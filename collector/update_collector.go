@@ -11,7 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 )
 
-const BaseArn string = "arn:aws-cn:ecs:%s:%s:service/%s/%s"
+const BaseArn string = "arn:aws%s:ecs:%s:%s:service/%s/%s"
 
 type eventReq struct {
 	Account   string `json:"account"`
@@ -21,13 +21,10 @@ type eventReq struct {
 }
 
 func UpdateCollector(ctx context.Context, req *eventReq) error {
-	log.Printf("aws will to update {%s} service, triggered by {%s} alarm", req.Service, req.AlarmName)
+	log.Printf("aws will to update {%v} service, triggered by {%v} alarm", req.Service, req.AlarmName)
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return err
-	}
-	if cfg.Region == "" {
-		return errors.New("default config Region is nil")
 	}
 	cred, err := cfg.Credentials.Retrieve(ctx)
 	if err != nil {
@@ -35,7 +32,18 @@ func UpdateCollector(ctx context.Context, req *eventReq) error {
 	} else if cred.AccessKeyID == "" || cred.SecretAccessKey == "" {
 		return errors.New("default config AccessKeyID or AccessKey is nil")
 	}
-	arn := fmt.Sprintf(BaseArn, cfg.Region, req.Account, req.Cluster, req.Service)
+	var arn string
+	if cfg.Region == "" || len(cfg.Region) < 2 {
+		return errors.New("default config Region is invalid")
+	}
+	switch cfg.Region[:2] {
+	case "cn":
+		arn = fmt.Sprintf(BaseArn, "-cn", cfg.Region, req.Account, req.Cluster, req.Service)
+	case "us":
+		arn = fmt.Sprintf(BaseArn, "", cfg.Region, req.Account, req.Cluster, req.Service)
+	default:
+		return errors.New("event region is invalid")
+	}
 	svc := ecs.NewFromConfig(cfg)
 	in := &ecs.DescribeServicesInput{
 		Services: []string{arn},
@@ -45,7 +53,7 @@ func UpdateCollector(ctx context.Context, req *eventReq) error {
 	if err != nil {
 		return err
 	} else if len(ins.Services) == 0 {
-		return errors.New(fmt.Sprintf("can't find service by arn: %s", arn))
+		return errors.New(fmt.Sprintf("can't find service by arn: %v", arn))
 	}
 	u := ecs.UpdateServiceInput{
 		Service:                       ins.Services[0].ServiceArn,
@@ -63,7 +71,7 @@ func UpdateCollector(ctx context.Context, req *eventReq) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("update {%s} service success", req.Service)
+	log.Printf("update {%v} service success", req.Service)
 	return nil
 }
 
